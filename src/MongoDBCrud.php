@@ -1,74 +1,160 @@
 <?php
 
-require __DIR__ . '/vendor/autoload.php';
+namespace App;
 
-use App\MongoDBCrud;
-use MongoDB\BSON\UTCDateTime;
+use MongoDB\Client;
+use MongoDB\Collection;
+use MongoDB\Database;
+use MongoDB\BSON\ObjectId;
+use Exception;
 
-try {
-    // La conexion y la base de datos se configuran en config.php.
-    $config = require __DIR__ . '/config.php';
+class MongoDBCrud
+{
+    private Database $db;
+    private Collection $collection;
 
-    $crud = new MongoDBCrud(
-        $config['mongodb_uri'],
-        $config['mongodb_database'],
-        'usuarios'
-    );
-
-    echo "=== EJEMPLO CRUD CON MongoDBCrud ===\n\n";
-
-    // CREATE: insertar un documento.
-    $id = $crud->create([
-        'nombre' => 'Ana Garcia',
-        'email' => 'ana@ejemplo.com',
-        'edad' => 25,
-        'activo' => true,
-        'roles' => ['usuario'],
-        'creado_en' => new UTCDateTime(),
-    ]);
-    echo "Documento insertado. ID: {$id}\n";
-
-    // CREATE MANY: insertar varios documentos.
-    $ids = $crud->createMany([
-        ['nombre' => 'Luis Perez', 'email' => 'luis@ejemplo.com', 'edad' => 32, 'activo' => true],
-        ['nombre' => 'Maria Lopez', 'email' => 'maria@ejemplo.com', 'edad' => 28, 'activo' => false],
-    ]);
-    echo 'Documentos insertados: ' . count($ids) . "\n\n";
-
-    // READ: buscar documentos con un filtro y opciones del driver.
-    echo "Usuarios mayores de 26 años:\n";
-    $usuarios = $crud->findAll(
-        ['edad' => ['$gt' => 26]],
-        ['sort' => ['nombre' => 1]]
-    );
-
-    foreach ($usuarios as $usuario) {
-        echo "- {$usuario['nombre']} ({$usuario['edad']} años)\n";
+    public function __construct(string $uri, string $database, string $collection)
+    {
+        try {
+            $client = new Client($uri);
+            $this->db = $client->selectDatabase($database);
+            $this->collection = $this->db->selectCollection($collection);
+        } catch (Exception $e) {
+            throw new Exception("Error al conectar con MongoDB: " . $e->getMessage());
+        }
     }
 
-    // READ: buscar por un campo y por ObjectId.
-    $usuario = $crud->findOne(['email' => 'ana@ejemplo.com']);
-    $usuarioPorId = $crud->findById($id);
-    echo "\nUsuario por email: " . ($usuario['nombre'] ?? 'no encontrado') . "\n";
-    echo 'Usuario por ID: ' . ($usuarioPorId['nombre'] ?? 'no encontrado') . "\n";
+    /**
+     * Insertar un documento
+     */
+    public function create(array $data): string
+    {
+        $result = $this->collection->insertOne($data);
+        return (string) $result->getInsertedId();
+    }
 
-    // COUNT: contar documentos.
-    echo "Total de usuarios: {$crud->count()}\n";
+    /**
+     * Insertar varios documentos
+     */
+    public function createMany(array $documents): array
+    {
+        $result = $this->collection->insertMany($documents);
+        return array_map('strval', $result->getInsertedIds());
+    }
 
-    // UPDATE: actualizar un documento por su ObjectId.
-    $modificados = $crud->update($id, [
-        'edad' => 26,
-        'actualizado_en' => new UTCDateTime(),
-    ]);
-    echo "Documentos modificados: {$modificados}\n";
+    /**
+     * Buscar todos los documentos
+     */
+    public function findAll(array $filter = [], array $options = []): array
+    {
+        return $this->collection->find($filter, $options)->toArray();
+    }
 
-    // UPDATE MANY: actualizar varios documentos.
-    $activados = $crud->updateMany(['activo' => false], ['activo' => true]);
-    echo "Documentos activados: {$activados}\n";
+    /**
+     * Buscar un documento por ID
+     */
+    public function findById(string $id): ?array
+    {
+        if (!ObjectId::isValid($id)) {
+            return null;
+        }
 
-    // DELETE: eliminar el documento creado al principio.
-    $eliminados = $crud->delete($id);
-    echo "Documentos eliminados: {$eliminados}\n";
-} catch (Throwable $e) {
-    echo 'Error: ' . $e->getMessage() . PHP_EOL;
+        $document = $this->collection->findOne(['_id' => new ObjectId($id)]);
+        return $document ? (array) $document : null;
+    }
+
+    /**
+     * Buscar un documento con filtro
+     */
+    public function findOne(array $filter): ?array
+    {
+        $document = $this->collection->findOne($filter);
+        return $document ? (array) $document : null;
+    }
+
+    /**
+     * Actualizar un documento por ID
+     */
+    public function update(string $id, array $data): int
+    {
+        if (!ObjectId::isValid($id)) {
+            return 0;
+        }
+
+        $result = $this->collection->updateOne(
+            ['_id' => new ObjectId($id)],
+            ['$set' => $data]
+        );
+
+        return $result->getModifiedCount();
+    }
+
+    /**
+     * Actualizar varios documentos
+     */
+    public function updateMany(array $filter, array $data): int
+    {
+        $result = $this->collection->updateMany(
+            $filter,
+            ['$set' => $data]
+        );
+
+        return $result->getModifiedCount();
+    }
+
+    /**
+     * Eliminar un documento por ID
+     */
+    public function delete(string $id): int
+    {
+        if (!ObjectId::isValid($id)) {
+            return 0;
+        }
+
+        $result = $this->collection->deleteOne(['_id' => new ObjectId($id)]);
+        return $result->getDeletedCount();
+    }
+
+    /**
+     * Eliminar varios documentos
+     */
+    public function deleteMany(array $filter): int
+    {
+        $result = $this->collection->deleteMany($filter);
+        return $result->getDeletedCount();
+    }
+
+    /**
+     * Contar documentos
+     */
+    public function count(array $filter = []): int
+    {
+        return $this->collection->countDocuments($filter);
+    }
+
+    /**
+     * Crear una colección
+     */
+    public function crearColeccion(string $nombreColeccion, array $opciones = []): bool
+    {
+        try {
+            $this->db->createCollection($nombreColeccion, $opciones);
+            return true;
+        } catch (Exception $e) {
+            throw new Exception("Error al crear la colección: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Eliminar una colección por completo
+     */
+    public function eliminarColeccion(string $nombreColeccion): bool
+    {
+        try {
+            $this->db->dropCollection($nombreColeccion);
+            return true;
+        } catch (Exception $e) {
+            throw new Exception("Error al eliminar la colección: " . $e->getMessage());
+        }
+    }
 }
