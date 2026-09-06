@@ -1,6 +1,20 @@
 # MongoDB CRUD para PHP
 
-Este directorio contiene `MongoDBCrud`, una clase sencilla para trabajar con MongoDB desde PHP. La clase se encuentra en `src/MongoDBCrud.php`, usa el driver oficial y permite insertar, consultar, actualizar, eliminar y contar documentos.
+Este directorio contiene una pequeña libreria para trabajar con MongoDB desde PHP. Usa el driver oficial y organiza el codigo en dos clases con responsabilidades diferentes:
+
+- `MongoDBCrud`: inserta, consulta, actualiza y elimina documentos de una coleccion.
+- `MongoDBDatabaseManager`: administra bases de datos, por ejemplo, creando su primera coleccion o eliminando la base de datos completa.
+
+## ¿Por que dos clases?
+
+Es preferible mantener dos clases porque trabajar con documentos y administrar bases de datos son responsabilidades distintas. Esta separacion hace que cada clase sea mas facil de entender, probar y reutilizar:
+
+- `MongoDBCrud` se usa en la logica habitual de una aplicacion.
+- `MongoDBDatabaseManager` se reserva para tareas administrativas y operaciones que requieren mas permisos.
+- Una aplicacion puede usar `MongoDBCrud` sin tener permisos para eliminar bases de datos.
+- El borrado de una base de datos queda aislado y es mas dificil ejecutarlo por accidente desde una operacion CRUD.
+
+No se ha renombrado `MongoDBCrud.php` ni se ha mezclado todo en una sola clase porque una clase unica terminaria acumulando operaciones sobre documentos, colecciones y bases de datos. Para un ejemplo muy pequeño una sola clase funcionaria, pero dos clases ofrecen una estructura mas clara cuando el proyecto crece.
 
 ## Requisitos
 
@@ -104,7 +118,28 @@ El ejemplo demuestra:
 - `update()` y `updateMany()` para actualizar.
 - `delete()` para eliminar un documento.
 
-## API disponible
+## Administracion de bases de datos
+
+La clase `MongoDBDatabaseManager` se utiliza para crear y eliminar bases de datos. Se mantiene separada de `MongoDBCrud` porque son responsabilidades diferentes.
+
+```php
+use App\MongoDBDatabaseManager;
+
+$config = require __DIR__ . '/config.php';
+$manager = new MongoDBDatabaseManager($config['mongodb_uri']);
+
+// MongoDB crea la base de datos al crear su primera coleccion.
+$manager->crearBaseDatos('otra_app', 'usuarios');
+
+// Operacion destructiva: elimina la base de datos completa.
+$manager->eliminarBaseDatos('otra_app');
+```
+
+`crearBaseDatos()` no utiliza una operacion `createDatabase`, porque MongoDB no la proporciona. Crea la primera coleccion y, como consecuencia, materializa la base de datos.
+
+`eliminarBaseDatos()` ejecuta `dropDatabase` y borra todas las colecciones y documentos. Debe utilizarse con permisos controlados y nunca directamente con nombres recibidos del usuario.
+
+## API de `MongoDBCrud`
 
 ### `create(array $data): string`
 
@@ -232,6 +267,7 @@ $crud->create([
 ## Archivos
 
 - `src/MongoDBCrud.php`: implementacion de la clase.
+- `src/MongoDBDatabaseManager.php`: administracion de bases de datos.
 - `config.php`: URI y nombre de la base de datos.
 - `mongodb.php`: ejemplo ejecutable que usa `config.php` y `MongoDBCrud`.
 - `composer.json`: dependencias y autoload PSR-4.
